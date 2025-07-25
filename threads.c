@@ -215,7 +215,7 @@ bool thread_start(Thread * thread, ThreadFn fun, void * arg) {
 	int saved_id = current_id;
 	struct ExitHandler saved_handler = exit_handler;
 	if (id_counter == INT_MAX) {
-		fprintf(stderr, "CThreads compatability layer : id counter overflow");
+		fprintf(stderr, "CThreads compatability layer : id counter overflow\n");
 		abort();
 	}
 	current_id = ++id_counter;
@@ -270,11 +270,13 @@ bool mutex_init(Mutex * mutex) {
 	*mutex = 0;
 	return true;
 }
+
 bool mutex_lock(Mutex * mutex) {
 	if (*mutex == 1) {
 		fprintf(stderr, "CThreads compatability layer : lock of already locked mutex\n");
 		abort();
 	}
+	*mutex = 1;
 	return true;
 }
 bool mutex_unlock(Mutex * mutex) {
