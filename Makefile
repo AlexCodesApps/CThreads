@@ -1,4 +1,4 @@
-.PHONY: donotcall
+.PHONY: donotcall, clean
 
 build/threads.o: build build/script threads.c threads.h
 	./build/script
@@ -11,3 +11,6 @@ build:
 
 build/script: build script.c
 	$(CC) script.c -o build/script
+
+clean:
+	rm -r build
