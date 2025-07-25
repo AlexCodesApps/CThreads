@@ -65,6 +65,7 @@ bool thread_detach(Thread * thread);
 bool thread_join(Thread * thread, int * status);
 ThreadId thread_id(const Thread * thread);
 ThreadId thread_id_current();
+bool thread_ids_equal(ThreadId a, ThreadId b);
 void thread_yield();
 
 bool mutex_init(Mutex * mutex);

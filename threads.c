@@ -24,6 +24,10 @@ ThreadId thread_id_current() {
 	return thrd_current();
 }
 
+bool thread_ids_equal(ThreadId a, ThreadId b) {
+	return thrd_equal(a, b);
+}
+
 void thread_yield() {
 	thrd_yield();
 }
@@ -64,7 +68,10 @@ static void * _thread_start(void * arg) {
 	ThreadFn fun = thread_args->fun;
 	int result = fun(arg2);
 	thread_args->status = result;
-	int should_free = atomic_flag_test_and_set(&thread_args->should_free);
+	int should_free = 
+		atomic_flag_test_and_set_explicit(
+				&thread_args->should_free,
+					memory_order_acquire);
 	if (should_free) {
 		free(thread_args);
 	}
@@ -79,7 +86,9 @@ bool thread_start(Thread * thread, ThreadFn fun, void * arg) {
 	thread_args->fun = fun;
 	thread_args->arg = arg;
 	thread_args->should_free = (atomic_flag)ATOMIC_FLAG_INIT;
-	int result = pthread_create(&thread->pthread, NULL, _thread_start, thread_args);
+	int result = 
+		pthread_create(&thread->pthread, NULL,
+						_thread_start, thread_args);
 	if (result != 0) {
 		free(thread_args);
 		return false;
@@ -90,7 +99,9 @@ bool thread_start(Thread * thread, ThreadFn fun, void * arg) {
 
 bool thread_detach(Thread * thread) {
 	ThreadArgs * thread_args = thread->internal;
-	int should_free = atomic_flag_test_and_set(&thread_args->should_free);
+	int should_free = atomic_flag_test_and_set_explicit(
+			&thread_args->should_free,
+				memory_order_acquire);
 	if (should_free) {
 		free(thread_args);
 	}
@@ -114,6 +125,10 @@ ThreadId thread_id(const Thread * thread) {
 
 ThreadId thread_id_current() {
 	return pthread_self();
+}
+
+bool thread_ids_equal(ThreadId a, ThreadId b) {
+	return pthread_equal(a, b) != 0;
 }
 
 void thread_yield() {
@@ -176,6 +191,10 @@ ThreadId thread_id(const Thread * thread) {
 
 ThreadId thread_id_current() {
 	return current_id;
+}
+
+bool thread_ids_equal(ThreadId a, ThreadId b) {
+	return a == b;
 }
 
 // Bc of single threading, this is useless
