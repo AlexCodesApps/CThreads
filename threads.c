@@ -70,8 +70,8 @@ static void * _thread_start(void * arg) {
 	thread_args->status = result;
 	int should_free = 
 		atomic_flag_test_and_set_explicit(
-				&thread_args->should_free,
-					memory_order_acquire);
+			&thread_args->should_free,
+				memory_order_relaxed);
 	if (should_free) {
 		free(thread_args);
 	}
@@ -99,9 +99,10 @@ bool thread_start(Thread * thread, ThreadFn fun, void * arg) {
 
 bool thread_detach(Thread * thread) {
 	ThreadArgs * thread_args = thread->internal;
-	int should_free = atomic_flag_test_and_set_explicit(
+	int should_free =
+		atomic_flag_test_and_set_explicit(
 			&thread_args->should_free,
-				memory_order_acquire);
+				memory_order_relaxed);
 	if (should_free) {
 		free(thread_args);
 	}
