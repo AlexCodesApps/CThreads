@@ -32,6 +32,10 @@ void thread_yield() {
 	thrd_yield();
 }
 
+void thread_exit(int status) {
+	thrd_exit(status);
+}
+
 bool mutex_init(Mutex * mutex) {
 	return mtx_init(mutex, mtx_plain) == 0;
 }
@@ -54,6 +58,9 @@ bool mutex_destroy(Mutex * mutex) {
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdatomic.h>
+#include <setjmp.h>
+#include <stdio.h>
+#include <stdint.h>
 
 typedef struct {
 	ThreadFn fun;
@@ -62,18 +69,42 @@ typedef struct {
 	atomic_flag should_free;
 } ThreadArgs;
 
+static atomic_size_t thread_count = 1;
+
+static _Thread_local struct {
+	bool  is_main_thread;
+	int status;
+	jmp_buf jmp;
+} exit_handler = { .is_main_thread = true };
+
 static void * _thread_start(void * arg) {
 	ThreadArgs * thread_args = arg;
 	void * arg2 = thread_args->arg;
 	ThreadFn fun = thread_args->fun;
-	int result = fun(arg2);
+	exit_handler.is_main_thread = false;
+	if (setjmp(exit_handler.jmp) != 0) {
+		thread_args->status = exit_handler.status;
+		goto cleanup;
+	}
+	size_t previous = atomic_fetch_add_explicit(&thread_count, 1, memory_order_relaxed);
+	if (previous == SIZE_MAX) {
+		fprintf(stderr, "CThreads pthreads backend : thread counter overflow\n");
+		abort();
+	}
+
+	int result = fun(arg2); // main execution here
+
 	thread_args->status = result;
+cleanup:;
 	int should_free = 
 		atomic_flag_test_and_set_explicit(
 			&thread_args->should_free,
 				memory_order_relaxed);
 	if (should_free) {
 		free(thread_args);
+	}
+	if (atomic_fetch_sub(&thread_count, 1) == 1) {
+		exit(result);
 	}
 	return NULL;
 }
@@ -117,6 +148,7 @@ bool thread_join(Thread * thread, int * status) {
 	if (status)
 		*status = thread_args->status;
 	free(thread_args);
+
 	return true;
 }
 
@@ -134,6 +166,17 @@ bool thread_ids_equal(ThreadId a, ThreadId b) {
 
 void thread_yield() {
 	sched_yield();
+}
+
+void thread_exit(int status) {
+	if (exit_handler.is_main_thread) {
+		if (atomic_fetch_sub(&thread_count, 1) == 1) {
+			exit(status);
+		}
+		pthread_exit(NULL);
+	}
+	exit_handler.status = status;
+	longjmp(exit_handler.jmp, 1);
 }
 
 bool mutex_init(Mutex * mutex) {
@@ -157,20 +200,35 @@ bool mutex_destroy(Mutex * mutex) {
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <setjmp.h>
 
 // Awful single threaded compatability layer
 
 static int current_id = 0;
+static struct ExitHandler {
+	int status;
+	jmp_buf buf;
+} exit_handler;
 
 bool thread_start(Thread * thread, ThreadFn fun, void * arg) {
 	static int id_counter = 0;
 	int saved_id = current_id;
+	struct ExitHandler saved_handler = exit_handler;
 	if (id_counter == INT_MAX) {
 		fprintf(stderr, "CThreads compatability layer : id counter overflow");
 		abort();
 	}
-	current_id = id_counter++;
+	current_id = ++id_counter;
+
+	if (setjmp(exit_handler.buf) != 0) {
+		thread->status = exit_handler.status;
+		goto cleanup;
+	}
+
 	thread->status = fun(arg);
+
+cleanup:
+	exit_handler = saved_handler;
 	thread->id = current_id;
 	current_id = saved_id;
 	return true;
@@ -196,6 +254,15 @@ ThreadId thread_id_current() {
 
 bool thread_ids_equal(ThreadId a, ThreadId b) {
 	return a == b;
+}
+
+void thread_yield() {}
+
+void thread_exit(int status) {
+	if (thread_id_current() == 0) {
+		exit(status);
+	}
+	longjmp(exit_handler.buf, 1);
 }
 
 // Bc of single threading, this is useless
