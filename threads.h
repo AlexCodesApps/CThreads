@@ -17,7 +17,7 @@ typedef thrd_t Thread;
 typedef thrd_t ThreadId;
 typedef mtx_t Mutex;
 
-#elif defined(__POSIX_VERSION) && !defined(__STDC_NO_ATOMIC__)
+#elif (defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))) && !defined(__STDC_NO_ATOMIC__)
 #define C_THREADS_PLATFORM 1
 
 #include <pthread.h>
