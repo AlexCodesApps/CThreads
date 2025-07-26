@@ -1,16 +1,10 @@
-.PHONY: donotcall, clean
+.PHONY: clean
 
-build/threads.o: build build/script threads.c threads.h
-	./build/script
+build/libCThreads.a: build/Makefile threads.h threads.c
+	make -C build
 
-donotcall:
-	$(CC) -c threads.c -o build/threads.o -std=c11 $(PTHREAD)
-
-build:
-	mkdir build
-
-build/script: build script.c
-	$(CC) script.c -o build/script
+build/Makefile: CMakeLists.txt
+	cmake -S . -B build -G "Unix Makefiles"
 
 clean:
 	rm -rf build

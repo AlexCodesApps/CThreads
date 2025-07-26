@@ -2,6 +2,7 @@
 
 #if C_THREADS_PLATFORM == C_THREADS_STDC
 
+#include <stdbool.h>
 #include <threads.h>
 
 bool thread_start(Thread * thread, ThreadFn fun, void *arg) {
@@ -32,7 +33,7 @@ void thread_yield() {
 	thrd_yield();
 }
 
-void thread_exit(int status) {
+C_THREADS_NORETURN void thread_exit(int status) {
 	thrd_exit(status);
 }
 
@@ -71,18 +72,23 @@ typedef struct {
 
 static atomic_size_t thread_count = 1;
 
-static C_THREADS_THREADLOCAL struct {
-	bool  is_main_thread;
+static pthread_key_t exit_handler_key;
+static pthread_once_t exit_handler_key_init_guard;
+
+typedef struct {
 	int status;
 	jmp_buf jmp;
-} exit_handler = { .is_main_thread = true };
+} ExitHandler;
 
 static void * _thread_start(void * arg) {
 	ThreadArgs * thread_args = arg;
-	exit_handler.is_main_thread = false;
+	ExitHandler exit_handler;
 	if (setjmp(exit_handler.jmp) != 0) {
 		thread_args->status = exit_handler.status;
 		goto cleanup;
+	}
+	if (pthread_setspecific(exit_handler_key, &exit_handler) != 0) {
+		abort();
 	}
 	size_t previous = atomic_fetch_add_explicit(&thread_count, 1, memory_order_relaxed);
 	if (previous == SIZE_MAX) {
@@ -110,7 +116,17 @@ cleanup:;
 	return NULL;
 }
 
+static void init_exit_handler_key() {
+	if (pthread_key_create(&exit_handler_key, NULL) != 0) {
+		fprintf(stderr, "CThreads pthreads backend : unable to "
+						"allocate thread local exit handler key");
+		abort();
+	}
+	pthread_setspecific(exit_handler_key, NULL);
+}
+
 bool thread_start(Thread * thread, ThreadFn fun, void * arg) {
+	pthread_once(&exit_handler_key_init_guard, init_exit_handler_key);
 	ThreadArgs * thread_args = malloc(sizeof(ThreadArgs));
 	if (!thread_args) {
 		return false;
@@ -169,15 +185,16 @@ void thread_yield() {
 	sched_yield();
 }
 
-void thread_exit(int status) {
-	if (exit_handler.is_main_thread) {
+C_THREADS_NORETURN void thread_exit(int status) {
+	ExitHandler * exit_handler = pthread_getspecific(exit_handler_key);
+	if (exit_handler == NULL) {
 		if (atomic_fetch_sub(&thread_count, 1) == 1) {
 			exit(status);
 		}
 		pthread_exit(NULL);
 	}
-	exit_handler.status = status;
-	longjmp(exit_handler.jmp, 1);
+	exit_handler->status = status;
+	longjmp(exit_handler->jmp, 1);
 }
 
 bool mutex_init(Mutex * mutex) {
@@ -194,6 +211,121 @@ bool mutex_unlock(Mutex * mutex) {
 
 bool mutex_destroy(Mutex * mutex) {
 	return pthread_mutex_destroy(mutex) == 0;
+}
+
+#elif C_THREADS_PLATFORM == C_THREADS_WINDOWS
+
+#include <Windows.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <setjmp.h>
+
+typedef struct {
+	ThreadFn fun;
+	void * arg;
+	int status;
+	LONG should_free;
+} ThreadArgs;
+
+DWORD _thread_start(void * arg) {
+	ThreadArgs * thread_args = arg;
+
+	void * arg2 = thread_args->arg;
+	ThreadFn fun = thread_args->fun;
+
+	int result = fun(arg2);
+
+	thread_args->status = result;
+
+	int should_free =
+		InterlockedBitTestAndSetNoFence(
+			&thread_args->status,
+			0);
+	if (should_free) {
+		free(thread_args);
+	}
+}
+
+bool thread_start(Thread * thread, ThreadFn fun, void * arg) {
+	ThreadArgs * thread_args = malloc(sizeof(ThreadArgs));
+	if (!thread_args) {
+		return false;
+	}
+	thread_args->fun = fun;
+	thread_args->arg = arg;
+	thread_args->should_free = 0;
+	HANDLE new_thread = CreateThread(NULL, 0, fun, thread_args, 0, 0);
+	if (!new_thread) {
+		free(thread_args);
+		return false;
+	}
+	thread->handle = new_thread;
+	thread->internal = thread_args;
+	return true;
+}
+
+bool thread_detach(Thread * thread) {
+	ThreadArgs * thread_args = thread->internal;
+	int should_free =
+		InterlockedBitTestAndSetNoFence(
+			&thread_args->should_free, 0);
+	if (should_free) {
+		free(thread_args);
+	}
+	return CloseHandle(thread->handle);
+}
+
+bool thread_join(Thread * thread, int * status) {
+	ThreadArgs * thread_args = thread->internal;
+	if (WaitForSingleObject(thread->handle, INFINITE) == WAIT_FAILED) {
+		return false;
+	}
+	if (status)
+		*status = thread_args->status;
+	free(thread_args);
+
+	return true;
+}
+
+ThreadId thread_id(const Thread * thread) {
+	return thread->handle;
+}
+
+ThreadId thread_id_current() {
+	return GetCurrentThreadId();
+}
+
+bool thread_ids_equal(ThreadId a, ThreadId b) {
+	return a == b;
+}
+
+void thread_yield() {
+	SwitchToThread();
+}
+
+void thread_exit(int status) {
+	ExitThread(status);
+}
+
+bool mutex_init(Mutex * mutex) {
+	HANDLE new_mutex = CreateMutexA(NULL, false, NULL);
+	if (!new_mutex) {
+		return false;
+	}
+	*mutex = new_mutex;
+	return true;
+}
+
+bool mutex_lock(Mutex * mutex) {
+	return WaitForSingleObject(*mutex, INFINITE) != WAIT_FAILED;
+}
+
+bool mutex_unlock(Mutex * mutex) {
+	return ReleaseMutex(*mutex);
+}
+
+bool mutex_destroy(Mutex * mutex) {
+	return CloseHandle(*mutex);
 }
 
 #else // C_THREADS_PLATFORM == C_THREADS_FALLBACK
@@ -260,7 +392,7 @@ bool thread_ids_equal(ThreadId a, ThreadId b) {
 
 void thread_yield() {}
 
-void thread_exit(int status) {
+C_THREADS_NORETURN void thread_exit(int status) {
 	if (thread_id_current() == 0) {
 		exit(status);
 	}
