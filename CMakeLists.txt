@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.10)
+project(CThreads LANGUAGES C)
+add_library(CThreads)
+set_target_properties(CThreads PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+target_sources(CThreads PRIVATE threads.c)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
