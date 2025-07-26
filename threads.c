@@ -21,7 +21,7 @@ ThreadId thread_id(const Thread *thread) {
 	return *thread;
 }
 
-ThreadId thread_id_current() {
+ThreadId thread_id_current(void) {
 	return thrd_current();
 }
 
@@ -29,7 +29,7 @@ bool thread_ids_equal(ThreadId a, ThreadId b) {
 	return thrd_equal(a, b);
 }
 
-void thread_yield() {
+void thread_yield(void) {
 	thrd_yield();
 }
 
@@ -83,6 +83,8 @@ typedef struct {
 static void * _thread_start(void * arg) {
 	ThreadArgs * thread_args = arg;
 	ExitHandler exit_handler;
+	size_t previous;
+	int result, should_free;
 	if (setjmp(exit_handler.jmp) != 0) {
 		thread_args->status = exit_handler.status;
 		goto cleanup;
@@ -90,20 +92,17 @@ static void * _thread_start(void * arg) {
 	if (pthread_setspecific(exit_handler_key, &exit_handler) != 0) {
 		abort();
 	}
-	size_t previous = atomic_fetch_add_explicit(&thread_count, 1, memory_order_relaxed);
+	previous = atomic_fetch_add_explicit(&thread_count, 1, memory_order_relaxed);
 	if (previous == SIZE_MAX) {
 		fprintf(stderr, "CThreads pthreads backend : thread counter overflow\n");
 		abort();
 	}
 
-	void * arg2 = thread_args->arg;
-	ThreadFn fun = thread_args->fun;
-
-	int result = fun(arg2); // main execution here
+	result = thread_args->fun(thread_args->arg);
 
 	thread_args->status = result;
 cleanup:;
-	int should_free =
+	should_free =
 		atomic_flag_test_and_set_explicit(
 			&thread_args->should_free,
 				memory_order_relaxed);
@@ -116,7 +115,7 @@ cleanup:;
 	return NULL;
 }
 
-static void init_exit_handler_key() {
+static void init_exit_handler_key(void) {
 	if (pthread_key_create(&exit_handler_key, NULL) != 0) {
 		fprintf(stderr, "CThreads pthreads backend : unable to "
 						"allocate thread local exit handler key");
@@ -126,15 +125,17 @@ static void init_exit_handler_key() {
 }
 
 bool thread_start(Thread * thread, ThreadFn fun, void * arg) {
+	ThreadArgs * thread_args;
+	int result;
 	pthread_once(&exit_handler_key_init_guard, init_exit_handler_key);
-	ThreadArgs * thread_args = malloc(sizeof(ThreadArgs));
+	thread_args = malloc(sizeof(ThreadArgs));
 	if (!thread_args) {
 		return false;
 	}
 	thread_args->fun = fun;
 	thread_args->arg = arg;
-	thread_args->should_free = (atomic_flag)ATOMIC_FLAG_INIT;
-	int result =
+	atomic_flag_clear(&thread_args->should_free);
+	result =
 		pthread_create(&thread->pthread, NULL,
 						_thread_start, thread_args);
 	if (result != 0) {
@@ -173,7 +174,7 @@ ThreadId thread_id(const Thread * thread) {
 	return thread->pthread;
 }
 
-ThreadId thread_id_current() {
+ThreadId thread_id_current(void) {
 	return pthread_self();
 }
 
@@ -181,7 +182,7 @@ bool thread_ids_equal(ThreadId a, ThreadId b) {
 	return pthread_equal(a, b) != 0;
 }
 
-void thread_yield() {
+void thread_yield(void) {
 	sched_yield();
 }
 
@@ -235,18 +236,22 @@ DWORD _thread_start(void * arg) {
 
 	int result = fun(arg2);
 
+	int should_free;
+
 	thread_args->status = result;
 
-	int should_free =
+	should_free =
 		InterlockedBitTestAndSetNoFence(
 			&thread_args->status,
 			0);
 	if (should_free) {
 		free(thread_args);
 	}
+	return result;
 }
 
 bool thread_start(Thread * thread, ThreadFn fun, void * arg) {
+	HANDLE new_thread;
 	ThreadArgs * thread_args = malloc(sizeof(ThreadArgs));
 	if (!thread_args) {
 		return false;
@@ -254,7 +259,7 @@ bool thread_start(Thread * thread, ThreadFn fun, void * arg) {
 	thread_args->fun = fun;
 	thread_args->arg = arg;
 	thread_args->should_free = 0;
-	HANDLE new_thread = CreateThread(NULL, 0, fun, thread_args, 0, 0);
+	new_thread = CreateThread(NULL, 0, fun, thread_args, 0, 0);
 	if (!new_thread) {
 		free(thread_args);
 		return false;
@@ -280,6 +285,7 @@ bool thread_join(Thread * thread, int * status) {
 	if (WaitForSingleObject(thread->handle, INFINITE) == WAIT_FAILED) {
 		return false;
 	}
+	CloseHandle(thread->handle);
 	if (status)
 		*status = thread_args->status;
 	free(thread_args);
@@ -291,7 +297,7 @@ ThreadId thread_id(const Thread * thread) {
 	return thread->handle;
 }
 
-ThreadId thread_id_current() {
+ThreadId thread_id_current(void) {
 	return GetCurrentThreadId();
 }
 
@@ -299,7 +305,7 @@ bool thread_ids_equal(ThreadId a, ThreadId b) {
 	return a == b;
 }
 
-void thread_yield() {
+void thread_yield(void) {
 	SwitchToThread();
 }
 
@@ -328,14 +334,14 @@ bool mutex_destroy(Mutex * mutex) {
 	return CloseHandle(*mutex);
 }
 
-#else // C_THREADS_PLATFORM == C_THREADS_FALLBACK
+#else /* C_THREADS_PLATFORM == C_THREADS_FALLBACK */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
 #include <setjmp.h>
 
-// Awful single threaded compatibility layer
+/* Awful single threaded compatibility layer */
 
 static int current_id = 0;
 static struct ExitHandler {
@@ -382,7 +388,7 @@ ThreadId thread_id(const Thread * thread) {
 	return thread->id;
 }
 
-ThreadId thread_id_current() {
+ThreadId thread_id_current(void) {
 	return current_id;
 }
 
@@ -390,7 +396,7 @@ bool thread_ids_equal(ThreadId a, ThreadId b) {
 	return a == b;
 }
 
-void thread_yield() {}
+void thread_yield(void) {}
 
 C_THREADS_NORETURN void thread_exit(int status) {
 	if (thread_id_current() == 0) {
@@ -399,7 +405,7 @@ C_THREADS_NORETURN void thread_exit(int status) {
 	longjmp(exit_handler.buf, 1);
 }
 
-// Bc of single threading, this is useless
+/* Bc of single threading, this is useless */
 bool mutex_init(Mutex * mutex) {
 	*mutex = 0;
 	return true;

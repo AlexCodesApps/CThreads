@@ -25,7 +25,7 @@
 extern "C" {
 #endif
 
-#if (__STDC_NO_THREADS__) && __STDC_VERSION__ >= 201112L
+#if !defined(__STDC_NO_THREADS__) && __STDC_VERSION__ >= 201112L
 #define C_THREADS_PLATFORM C_THREADS_STDC
 
 #include <threads.h>
@@ -89,9 +89,9 @@ bool thread_start(Thread * thread, ThreadFn fun, void * arg);
 bool thread_detach(Thread * thread);
 bool thread_join(Thread * thread, int * status);
 ThreadId thread_id(const Thread * thread);
-ThreadId thread_id_current();
+ThreadId thread_id_current(void);
 bool thread_ids_equal(ThreadId a, ThreadId b);
-void thread_yield();
+void thread_yield(void);
 C_THREADS_NORETURN void thread_exit(int status);
 
 bool mutex_init(Mutex * mutex);
