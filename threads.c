@@ -1,6 +1,6 @@
 #include "threads.h"
 
-#if C_THREADS_PLATFORM == 0
+#if C_THREADS_PLATFORM == C_THREADS_STDC
 
 #include <threads.h>
 
@@ -53,7 +53,7 @@ bool mutex_destroy(Mutex * mutex) {
 	return true;
 }
 
-#elif C_THREADS_PLATFORM == 1
+#elif C_THREADS_PLATFORM == C_THREADS_POSIX
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -79,8 +79,6 @@ static _Thread_local struct {
 
 static void * _thread_start(void * arg) {
 	ThreadArgs * thread_args = arg;
-	void * arg2 = thread_args->arg;
-	ThreadFn fun = thread_args->fun;
 	exit_handler.is_main_thread = false;
 	if (setjmp(exit_handler.jmp) != 0) {
 		thread_args->status = exit_handler.status;
@@ -92,11 +90,14 @@ static void * _thread_start(void * arg) {
 		abort();
 	}
 
+	void * arg2 = thread_args->arg;
+	ThreadFn fun = thread_args->fun;
+
 	int result = fun(arg2); // main execution here
 
 	thread_args->status = result;
 cleanup:;
-	int should_free = 
+	int should_free =
 		atomic_flag_test_and_set_explicit(
 			&thread_args->should_free,
 				memory_order_relaxed);
@@ -117,7 +118,7 @@ bool thread_start(Thread * thread, ThreadFn fun, void * arg) {
 	thread_args->fun = fun;
 	thread_args->arg = arg;
 	thread_args->should_free = (atomic_flag)ATOMIC_FLAG_INIT;
-	int result = 
+	int result =
 		pthread_create(&thread->pthread, NULL,
 						_thread_start, thread_args);
 	if (result != 0) {
@@ -195,14 +196,14 @@ bool mutex_destroy(Mutex * mutex) {
 	return pthread_mutex_destroy(mutex) == 0;
 }
 
-#else
+#else // C_THREADS_PLATFORM == C_THREADS_FALLBACK
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
 #include <setjmp.h>
 
-// Awful single threaded compatability layer
+// Awful single threaded compatibility layer
 
 static int current_id = 0;
 static struct ExitHandler {
@@ -215,9 +216,10 @@ bool thread_start(Thread * thread, ThreadFn fun, void * arg) {
 	int saved_id = current_id;
 	struct ExitHandler saved_handler = exit_handler;
 	if (id_counter == INT_MAX) {
-		fprintf(stderr, "CThreads compatability layer : id counter overflow\n");
+		fprintf(stderr, "CThreads compatibility layer : id counter overflow\n");
 		abort();
 	}
+
 	current_id = ++id_counter;
 
 	if (setjmp(exit_handler.buf) != 0) {
@@ -273,12 +275,13 @@ bool mutex_init(Mutex * mutex) {
 
 bool mutex_lock(Mutex * mutex) {
 	if (*mutex == 1) {
-		fprintf(stderr, "CThreads compatability layer : lock of already locked mutex\n");
+		fprintf(stderr, "CThreads compatibility layer : lock of already locked mutex\n");
 		abort();
 	}
 	*mutex = 1;
 	return true;
 }
+
 bool mutex_unlock(Mutex * mutex) {
 	*mutex = 0;
 	return true;

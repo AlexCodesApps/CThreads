@@ -1,6 +1,10 @@
 #ifndef C_THREADS_H
 #define C_THREADS_H
 
+#define C_THREADS_STDC 0
+#define C_THREADS_POSIX 1
+#define C_THREADS_FALLBACK 2
+
 #ifdef __cplusplus
 // #include <thread>
 // #include <type_traits>
@@ -9,7 +13,7 @@ extern "C" {
 #endif
 
 #if !defined(__STDC_NO_THREADS__)
-#define C_THREADS_PLATFORM 0
+#define C_THREADS_PLATFORM C_THREADS_STDC
 
 #include <threads.h>
 
@@ -18,7 +22,7 @@ typedef thrd_t ThreadId;
 typedef mtx_t Mutex;
 
 #elif (defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))) && !defined(__STDC_NO_ATOMIC__)
-#define C_THREADS_PLATFORM 1
+#define C_THREADS_PLATFORM C_THREADS_POSIX
 
 #include <pthread.h>
 
@@ -47,7 +51,7 @@ typedef struct {
 } Mutex;
 
 #else
-#define C_THREADS_PLATFORM 2
+#define C_THREADS_PLATFORM C_THREADS_FALLBACK
 
 typedef struct {
 	int status;

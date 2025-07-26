@@ -11,9 +11,9 @@ int run(void * arg) {
 	struct State * state = arg;
 	mutex_lock(&state->mutex);
 	int item = ++state->resource;
-	mutex_unlock(&state->mutex);
-	// relying on thread_id being an integer maybe not portable? no good choice for api anyways
+	// relying on ThreadId being an integer maybe not portable? no good choice for api anyways
 	printf("thread id [%lu] value [%d]\n", (size_t)thread_id_current(), item);
+	mutex_unlock(&state->mutex);
 	
 	return item;
 }

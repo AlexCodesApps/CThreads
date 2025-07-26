@@ -13,4 +13,4 @@ build/script: build script.c
 	$(CC) script.c -o build/script
 
 clean:
-	rm -r build
+	rm -rf build
