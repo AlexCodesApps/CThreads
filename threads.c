@@ -71,7 +71,7 @@ typedef struct {
 
 static atomic_size_t thread_count = 1;
 
-static _Thread_local struct {
+static C_THREADS_THREADLOCAL struct {
 	bool  is_main_thread;
 	int status;
 	jmp_buf jmp;
