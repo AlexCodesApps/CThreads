@@ -33,7 +33,7 @@ void thread_yield() {
 	thrd_yield();
 }
 
-void thread_exit(int status) {
+C_THREADS_NORETURN void thread_exit(int status) {
 	thrd_exit(status);
 }
 
@@ -72,18 +72,23 @@ typedef struct {
 
 static atomic_size_t thread_count = 1;
 
-static C_THREADS_THREADLOCAL struct {
-	bool  is_main_thread;
+static pthread_key_t exit_handler_key;
+static pthread_once_t exit_handler_key_init_guard;
+
+typedef struct {
 	int status;
 	jmp_buf jmp;
-} exit_handler = { .is_main_thread = true };
+} ExitHandler;
 
 static void * _thread_start(void * arg) {
 	ThreadArgs * thread_args = arg;
-	exit_handler.is_main_thread = false;
+	ExitHandler exit_handler;
 	if (setjmp(exit_handler.jmp) != 0) {
 		thread_args->status = exit_handler.status;
 		goto cleanup;
+	}
+	if (pthread_setspecific(exit_handler_key, &exit_handler) != 0) {
+		abort();
 	}
 	size_t previous = atomic_fetch_add_explicit(&thread_count, 1, memory_order_relaxed);
 	if (previous == SIZE_MAX) {
@@ -111,7 +116,17 @@ cleanup:;
 	return NULL;
 }
 
+static void init_exit_handler_key() {
+	if (pthread_key_create(&exit_handler_key, NULL) != 0) {
+		fprintf(stderr, "CThreads pthreads backend : unable to "
+						"allocate thread local exit handler key");
+		abort();
+	}
+	pthread_setspecific(exit_handler_key, NULL);
+}
+
 bool thread_start(Thread * thread, ThreadFn fun, void * arg) {
+	pthread_once(&exit_handler_key_init_guard, init_exit_handler_key);
 	ThreadArgs * thread_args = malloc(sizeof(ThreadArgs));
 	if (!thread_args) {
 		return false;
@@ -170,15 +185,16 @@ void thread_yield() {
 	sched_yield();
 }
 
-void thread_exit(int status) {
-	if (exit_handler.is_main_thread) {
+C_THREADS_NORETURN void thread_exit(int status) {
+	ExitHandler * exit_handler = pthread_getspecific(exit_handler_key);
+	if (exit_handler == NULL) {
 		if (atomic_fetch_sub(&thread_count, 1) == 1) {
 			exit(status);
 		}
 		pthread_exit(NULL);
 	}
-	exit_handler.status = status;
-	longjmp(exit_handler.jmp, 1);
+	exit_handler->status = status;
+	longjmp(exit_handler->jmp, 1);
 }
 
 bool mutex_init(Mutex * mutex) {
@@ -376,7 +392,7 @@ bool thread_ids_equal(ThreadId a, ThreadId b) {
 
 void thread_yield() {}
 
-void thread_exit(int status) {
+C_THREADS_NORETURN void thread_exit(int status) {
 	if (thread_id_current() == 0) {
 		exit(status);
 	}
