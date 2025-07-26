@@ -2,6 +2,7 @@
 
 #if C_THREADS_PLATFORM == C_THREADS_STDC
 
+#include <stdbool.h>
 #include <threads.h>
 
 bool thread_start(Thread * thread, ThreadFn fun, void *arg) {
@@ -194,6 +195,121 @@ bool mutex_unlock(Mutex * mutex) {
 
 bool mutex_destroy(Mutex * mutex) {
 	return pthread_mutex_destroy(mutex) == 0;
+}
+
+#elif C_THREADS_PLATFORM == C_THREADS_WINDOWS
+
+#include <Windows.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <setjmp.h>
+
+typedef struct {
+	ThreadFn fun;
+	void * arg;
+	int status;
+	LONG should_free;
+} ThreadArgs;
+
+DWORD _thread_start(void * arg) {
+	ThreadArgs * thread_args = arg;
+
+	void * arg2 = thread_args->arg;
+	ThreadFn fun = thread_args->fun;
+
+	int result = fun(arg2);
+
+	thread_args->status = result;
+
+	int should_free =
+		InterlockedBitTestAndSetNoFence(
+			&thread_args->status,
+			0);
+	if (should_free) {
+		free(thread_args);
+	}
+}
+
+bool thread_start(Thread * thread, ThreadFn fun, void * arg) {
+	ThreadArgs * thread_args = malloc(sizeof(ThreadArgs));
+	if (!thread_args) {
+		return false;
+	}
+	thread_args->fun = fun;
+	thread_args->arg = arg;
+	thread_args->should_free = 0;
+	HANDLE new_thread = CreateThread(NULL, 0, fun, thread_args, 0, 0);
+	if (!new_thread) {
+		free(thread_args);
+		return false;
+	}
+	thread->handle = new_thread;
+	thread->internal = thread_args;
+	return true;
+}
+
+bool thread_detach(Thread * thread) {
+	ThreadArgs * thread_args = thread->internal;
+	int should_free =
+		InterlockedBitTestAndSetNoFence(
+			&thread_args->should_free, 0);
+	if (should_free) {
+		free(thread_args);
+	}
+	return CloseHandle(thread->handle);
+}
+
+bool thread_join(Thread * thread, int * status) {
+	ThreadArgs * thread_args = thread->internal;
+	if (WaitForSingleObject(thread->handle, INFINITE) == WAIT_FAILED) {
+		return false;
+	}
+	if (status)
+		*status = thread_args->status;
+	free(thread_args);
+
+	return true;
+}
+
+ThreadId thread_id(const Thread * thread) {
+	return thread->handle;
+}
+
+ThreadId thread_id_current() {
+	return GetCurrentThreadId();
+}
+
+bool thread_ids_equal(ThreadId a, ThreadId b) {
+	return a == b;
+}
+
+void thread_yield() {
+	SwitchToThread();
+}
+
+void thread_exit(int status) {
+	ExitThread(status);
+}
+
+bool mutex_init(Mutex * mutex) {
+	HANDLE new_mutex = CreateMutexA(NULL, false, NULL);
+	if (!new_mutex) {
+		return false;
+	}
+	*mutex = new_mutex;
+	return true;
+}
+
+bool mutex_lock(Mutex * mutex) {
+	return WaitForSingleObject(*mutex, INFINITE) != WAIT_FAILED;
+}
+
+bool mutex_unlock(Mutex * mutex) {
+	return ReleaseMutex(*mutex);
+}
+
+bool mutex_destroy(Mutex * mutex) {
+	return CloseHandle(*mutex);
 }
 
 #else // C_THREADS_PLATFORM == C_THREADS_FALLBACK

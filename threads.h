@@ -3,30 +3,17 @@
 
 #define C_THREADS_STDC 0
 #define C_THREADS_POSIX 1
-#define C_THREADS_FALLBACK 2
+#define C_THREADS_WINDOWS 2
+#define C_THREADS_FALLBACK 3
 
 #ifdef __cplusplus
 // #include <thread>
 // #include <type_traits>
 // #include <mutex>
 extern "C" {
-#if __cplusplus < 201103L
-#error unsupported C++ standard
-#else
-#define C_THREADS_NO_RETURN [[noreturn]]
-#define C_THREADS_THREADLOCAL thread_local
-#endif // __cplusplus < 201103L
-#elif !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 201112L)
-#error unsupported C standard
-#elif __STDC_VERSION__ >= 202311L // C23
-#define C_THREADS_NO_RETURN [[noreturn]]
-#define C_THREADS_THREADLOCAL thread_local
-#else // C11
-#define C_THREADS_NO_RETURN _Noreturn
-#define C_THREADS_THREADLOCAL _Thread_local
-#endif // __cplusplus
+#endif
 
-#if !defined(__STDC_NO_THREADS__)
+#if !defined(__STDC_NO_THREADS__) && __STDC_VERSION__ >= 201112L
 #define C_THREADS_PLATFORM C_THREADS_STDC
 
 #include <threads.h>
@@ -51,8 +38,6 @@ typedef pthread_mutex_t Mutex;
 
 static_assert(std::is_trivially_copyable<std::thread::id>::value);
 static_assert(std::is_trivially_destructible<std::thread::id>::value);
-
-typedef struct {
 	char buffer[sizeof(std::thread::id)]; // is this ok? I don't speak standardese
 } ThreadId;
 
@@ -63,6 +48,16 @@ typedef struct {
 typedef struct {
 	std::mutex * mutex;
 } Mutex;
+#elif _WIN32
+#define C_THREADS_PLATFORM C_THREADS_WINDOWS
+#include <Windows.h>
+
+typedef struct {
+	HANDLE handle;
+	void * internal;
+} Thread;
+typedef DWORD ThreadId;
+typedef HANDLE Mutex;
 
 #else
 #define C_THREADS_PLATFORM C_THREADS_FALLBACK
@@ -85,7 +80,7 @@ ThreadId thread_id(const Thread * thread);
 ThreadId thread_id_current();
 bool thread_ids_equal(ThreadId a, ThreadId b);
 void thread_yield();
-C_THREADS_NO_RETURN void thread_exit(int status);
+void thread_exit(int status);
 
 bool mutex_init(Mutex * mutex);
 bool mutex_lock(Mutex * mutex);
