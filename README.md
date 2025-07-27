@@ -1,0 +1,2 @@
+- First class support for C11 with backwards compatablility for C89
+- Made to support all major platforms, including Linux, Windows, MacOS, FreeBSD, ect.
