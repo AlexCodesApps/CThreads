@@ -1,11 +1,6 @@
 #ifndef C_THREADS_H
 #define C_THREADS_H
 
-#define C_THREADS_STDC 0
-#define C_THREADS_POSIX 1
-#define C_THREADS_WINDOWS 2
-#define C_THREADS_FALLBACK 3
-
 #ifdef _MSC_VER
 #define C_THREADS_NORETURN __declspec(noreturn)
 #elif defined(__GNUC__)
@@ -19,14 +14,10 @@
 #endif
 
 #ifdef __cplusplus
-// #include <thread>
-// #include <type_traits>
-// #include <mutex>
 extern "C" {
 #endif
 
-#if !defined(__STDC_NO_THREADS__) && __STDC_VERSION__ >= 201112L
-#define C_THREADS_PLATFORM C_THREADS_STDC
+#if C_THREADS_PLATFORM == C_THREADS_STDC
 
 #include <threads.h>
 
@@ -34,8 +25,7 @@ typedef thrd_t Thread;
 typedef thrd_t ThreadId;
 typedef mtx_t Mutex;
 
-#elif (defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))) && !defined(__STDC_NO_ATOMIC__)
-#define C_THREADS_PLATFORM C_THREADS_POSIX
+#elif C_THREADS_PLATFORM == C_THREADS_POSIX
 
 #include <pthread.h>
 
@@ -46,22 +36,7 @@ typedef struct {
 typedef pthread_t ThreadId;
 typedef pthread_mutex_t Mutex;
 
-#elif defined(__cplusplus) && 0 // C++ fallback in the future?
-
-static_assert(std::is_trivially_copyable<std::thread::id>::value);
-static_assert(std::is_trivially_destructible<std::thread::id>::value);
-	char buffer[sizeof(std::thread::id)]; // is this ok? I don't speak standardese
-} ThreadId;
-
-typedef struct {
-	std::thread * thread;
-} Thread;
-
-typedef struct {
-	std::mutex * mutex;
-} Mutex;
-#elif _WIN32
-#define C_THREADS_PLATFORM C_THREADS_WINDOWS
+#elif C_THREADS_PLATFORM == C_THREADS_WINDOWS
 #include <Windows.h>
 
 typedef struct {
@@ -71,8 +46,7 @@ typedef struct {
 typedef DWORD ThreadId;
 typedef HANDLE Mutex;
 
-#else
-#define C_THREADS_PLATFORM C_THREADS_FALLBACK
+#else /* C_THREADS_PLATFORM == C_THREADS_FALLBACK */
 
 typedef struct {
 	int status;
@@ -101,6 +75,6 @@ bool mutex_destroy(Mutex * mutex);
 
 #ifdef __cplusplus
 }
-#endif // __cplusplus
+#endif /* __cplusplus */
 
-#endif // C_THREADS_H
+#endif /* C_THREADS_H */

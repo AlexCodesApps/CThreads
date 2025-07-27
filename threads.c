@@ -105,7 +105,7 @@ cleanup:;
 	should_free =
 		atomic_flag_test_and_set_explicit(
 			&thread_args->should_free,
-				memory_order_relaxed);
+				memory_order_acq_rel);
 	if (should_free) {
 		free(thread_args);
 	}
@@ -134,7 +134,7 @@ bool thread_start(Thread * thread, ThreadFn fun, void * arg) {
 	}
 	thread_args->fun = fun;
 	thread_args->arg = arg;
-	atomic_flag_clear(&thread_args->should_free);
+	atomic_flag_clear_explicit(&thread_args->should_free, memory_order_relaxed);
 	result =
 		pthread_create(&thread->pthread, NULL,
 						_thread_start, thread_args);
@@ -151,7 +151,7 @@ bool thread_detach(Thread * thread) {
 	int should_free =
 		atomic_flag_test_and_set_explicit(
 			&thread_args->should_free,
-				memory_order_relaxed);
+				memory_order_acq_rel);
 	if (should_free) {
 		free(thread_args);
 	}
@@ -188,7 +188,7 @@ void thread_yield(void) {
 
 C_THREADS_NORETURN void thread_exit(int status) {
 	ExitHandler * exit_handler = pthread_getspecific(exit_handler_key);
-	if (exit_handler == NULL) {
+	if (exit_handler == NULL) { // main thread
 		if (atomic_fetch_sub(&thread_count, 1) == 1) {
 			exit(status);
 		}
