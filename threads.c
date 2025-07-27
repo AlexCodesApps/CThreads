@@ -228,7 +228,7 @@ typedef struct {
 	LONG should_free;
 } ThreadArgs;
 
-DWORD _thread_start(void * arg) {
+static DWORD WINAPI _thread_start(void * arg) {
 	ThreadArgs * thread_args = arg;
 
 	void * arg2 = thread_args->arg;
@@ -242,7 +242,7 @@ DWORD _thread_start(void * arg) {
 
 	should_free =
 		InterlockedBitTestAndSetNoFence(
-			&thread_args->status,
+			&thread_args->should_free,
 			0);
 	if (should_free) {
 		free(thread_args);
@@ -259,7 +259,7 @@ bool thread_start(Thread * thread, ThreadFn fun, void * arg) {
 	thread_args->fun = fun;
 	thread_args->arg = arg;
 	thread_args->should_free = 0;
-	new_thread = CreateThread(NULL, 0, fun, thread_args, 0, 0);
+	new_thread = (HANDLE)CreateThread(NULL, 0, _thread_start, thread_args, 0, NULL);
 	if (!new_thread) {
 		free(thread_args);
 		return false;
@@ -282,7 +282,8 @@ bool thread_detach(Thread * thread) {
 
 bool thread_join(Thread * thread, int * status) {
 	ThreadArgs * thread_args = thread->internal;
-	if (WaitForSingleObject(thread->handle, INFINITE) == WAIT_FAILED) {
+	DWORD wait_result = WaitForSingleObject(thread->handle, INFINITE);
+	if (wait_result == WAIT_FAILED) {
 		return false;
 	}
 	CloseHandle(thread->handle);
@@ -294,7 +295,7 @@ bool thread_join(Thread * thread, int * status) {
 }
 
 ThreadId thread_id(const Thread * thread) {
-	return thread->handle;
+	return GetThreadId(thread->handle);
 }
 
 ThreadId thread_id_current(void) {
@@ -314,7 +315,7 @@ void thread_exit(int status) {
 }
 
 bool mutex_init(Mutex * mutex) {
-	HANDLE new_mutex = CreateMutexA(NULL, false, NULL);
+	HANDLE new_mutex = CreateMutex(NULL, FALSE, NULL);
 	if (!new_mutex) {
 		return false;
 	}
@@ -323,7 +324,7 @@ bool mutex_init(Mutex * mutex) {
 }
 
 bool mutex_lock(Mutex * mutex) {
-	return WaitForSingleObject(*mutex, INFINITE) != WAIT_FAILED;
+	return WaitForSingleObject(*mutex, INFINITE) == WAIT_OBJECT_0;
 }
 
 bool mutex_unlock(Mutex * mutex) {

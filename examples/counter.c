@@ -1,6 +1,6 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include "../threads.h"
-#include <threads.h>
 
 struct State {
 	Mutex mutex;
@@ -11,10 +11,10 @@ int run(void * arg) {
 	struct State * state = arg;
 	mutex_lock(&state->mutex);
 	int item = ++state->resource;
-	// relying on ThreadId being an integer maybe not portable? no good choice for api anyways
-	printf("thread id [%lu] value [%d]\n", (size_t)thread_id_current(), item);
+	printf("value [%d]\n", item);
 	mutex_unlock(&state->mutex);
 	
+	printf("ending [%d]\n", item);
 	return item;
 }
 
@@ -26,7 +26,8 @@ int main() {
 	Thread threads[10];
 
 	for (int i = 0; i < 10; ++i) {
-		thread_start(threads + i, run, &state);
+		if (!thread_start(threads + i, run, &state))
+			abort();
 	}
 	for (int i = 0; i < 10; ++i) {
 		thread_detach(threads + i);
